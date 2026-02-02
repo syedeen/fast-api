@@ -1,29 +1,80 @@
 from fastapi import FastAPI , HTTPException , Response , status
 from fastapi.params import Body
+from fastapi import Depends
 from pydantic import BaseModel
 from typing import Optional
-from random import randrange
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from psycopg2 import pool   
 import time
+import os
+from dotenv import load_dotenv
+load_dotenv()
+from contextlib import asynccontextmanager
 
-app = FastAPI()
+
+connection_pool = None
+
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global connection_pool
+    print("Creating connection pool...")
+
+    required_variables = ["DB_USER","DB_PASSWORD","DB_NAME"]
+    missing_variables = [var for var in required_variables if not os.getenv(var)]
+
+    if missing_variables:
+        raise ValueError(f"Missing required environment variables:{', '.join(missing_variables)}")
+    
+    try:
+        #connection pool
+        connection_pool = pool.ThreadedConnectionPool(
+        minconn=1,
+        maxconn=20,
+        dbname = os.getenv("DB_NAME"),
+        user = os.getenv("DB_USER"),
+        host=os.getenv("DB_HOST"),
+        port=int(os.getenv("DB_PORT")),
+        password=os.getenv("DB_PASSWORD"),
+        cursor_factory=RealDictCursor
+    )
+    
+        
+    except Exception as error:
+        print("Failed to create connection pool")
+        raise
+
+    yield
+    print("Closing connection pool...")
+        
+
+    if connection_pool:
+        connection_pool.closeall()
+        print("connection pool closed")
+
+app = FastAPI(lifespan=lifespan)
+
+
+#dependency
+def get_db():
+    conn = connection_pool.getconn()
+    try:
+        yield conn
+    finally:
+        connection_pool.putconn(conn)
+        
+
 
 
 @app.get("/")
 def root():
     return {"welcome to my API"}
 
-while True:
-    try:
-        conn = psycopg2.connect(dbname="py_db" , user="postgres", host = "localhost" , port=5432 , password = "2005" ,  cursor_factory=RealDictCursor)
-        cursor = conn.cursor()
-        print("Database connection successfull")
-        break
-    except Exception as error:
-        print("connection to database failed")
-        print("Error :",error)
-        time.sleep(2)
+
+
+
 
 # No pydantic model 
 # @app.post("/films")
@@ -41,32 +92,11 @@ class films(BaseModel):
 
 
 
-# get_film_by_id
-def get_film(film_id:int):
-    try:
-        cursor.execute("""
-        SELECT * 
-        FROM films 
-        WHERE film_id = %s
-    """, 
-    (
-        film_id
-    )
-    )
-        film = cursor.fetchone()
-        if not film:
-            raise HTTPException(status_code=404 , detail="film not found")
-        return {"data":film}
-    except Exception as error:
-        raise HTTPException(status_code=500 , detail=str(error))
-
-
-
-
 
 # create film
 @app.post("/films",status_code=status.HTTP_201_CREATED)
-def create_films(new_film:films):
+def create_films(new_film:films, conn = Depends(get_db)):
+    cursor = conn.cursor()
     my_film = new_film.model_dump()
     cursor.execute("""
        INSERT INTO 
@@ -90,7 +120,8 @@ def create_films(new_film:films):
 
 # all film 
 @app.get("/films")
-def get_films():
+def get_films(conn = Depends(get_db)):
+    cursor = conn.cursor()
     try:
         cursor.execute(""" 
         SELECT * 
@@ -101,14 +132,18 @@ def get_films():
             raise HTTPException(status_code=404 , detail="No films available")
         return {"data":films}
     except Exception as error:
+        conn.rollback()
         raise HTTPException(status_code=500 , detail=str(error))
+    finally:
+        cursor.close()
 
 
 
 
 # latest film
 @app.get("/films/latest_film")
-def latest_post():
+def latest_post(conn = Depends(get_db)):
+    cursor = conn.cursor()
     try:
         cursor.execute("""
             SELECT *
@@ -121,18 +156,36 @@ def latest_post():
             raise HTTPException(status_code=404 , detail="No films available")
         return {"data":latest_film}
     except Exception as error:
+        conn.rollback()
         raise HTTPException(status_code=500 , detail=str(error))
-        
+    finally:
+        cursor.close()
     
 
 
 # individual film
-@app.get("/films/{id}")
-def get_film_id(id:int):
-    film = get_film(id)
-    if not film:
-        raise HTTPException(status_code = 404 , detail=f"film with id-{id} not found")
-    return film
+@app.get("/films/{film_id}")
+def get_film_id(film_id:int,conn = Depends(get_db)):
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+        SELECT * 
+        FROM films 
+        WHERE film_id = %s
+    """, 
+    (
+        film_id, 
+    )
+    )
+        film = cursor.fetchone()
+        if not film:
+            raise HTTPException(status_code=404 , detail="film not found")
+        return {"data":film}
+    except Exception as error:
+        conn.rollback()
+        raise HTTPException(status_code=500 , detail=str(error))
+    finally:
+        cursor.close()
 
 
 # response
@@ -149,7 +202,8 @@ def get_film_id(id:int):
 
 # delete film
 @app.delete("/films/{film_id}" , status_code=status.HTTP_204_NO_CONTENT)
-def delete_films(film_id:int):
+def delete_films(film_id:int,conn = Depends(get_db)):
+    cursor = conn.cursor()
     try:
         cursor.execute("""
         DELETE FROM films WHERE film_id = %s RETURNING *
@@ -159,14 +213,17 @@ def delete_films(film_id:int):
         if not deleted:
             raise HTTPException(status_code=404 , detail="Film not found")
     except Exception as error:
+        conn.rollback()
         raise HTTPException(status_code=500 , detail=str(error))
-    
+    finally:
+        cursor.close()   
 
     
 
 # update(put)
 @app.put("/films/{film_id}" , status_code=status.HTTP_204_NO_CONTENT)
-def update_film(film_id:int, film:films):
+def update_film(film_id:int, film:films ,conn = Depends(get_db)):
+    cursor = conn.cursor()
     film = film.model_dump()
     try:
         cursor.execute("""
@@ -185,8 +242,10 @@ def update_film(film_id:int, film:films):
         if not updated:
             raise HTTPException(status_code=404 , detail="Film not found")
     except Exception as error:
+        conn.rollback()
         raise HTTPException(status_code=500 , detail=str(error))
+    finally:
+        cursor.close()
     
-   
 
  
