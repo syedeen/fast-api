@@ -18,6 +18,8 @@ database_url = URL.create(
     database=os.getenv("DB_NAME")
 )
 
+
+
 engine = create_engine(
     url=database_url ,
     echo=True ,  
