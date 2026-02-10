@@ -36,7 +36,7 @@ MAX_LOGIN_ATTEMPTS = 5
 LOCKIN_DURATION_MINUTES = 15
 
 
-origins = ["https://www.google.com"]
+origins = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
