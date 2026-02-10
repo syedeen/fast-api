@@ -1,4 +1,5 @@
 from fastapi import FastAPI , HTTPException , Response , status , Depends 
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.params import Body
 from typing import Optional , List
 from .database import engine , Base , get_db
@@ -28,11 +29,25 @@ from .auth import (
 
 
 
-Base.metadata.create_all(bind=engine)
+# Base.metadata.create_all(bind=engine)
 app = FastAPI()
 
 MAX_LOGIN_ATTEMPTS = 5
 LOCKIN_DURATION_MINUTES = 15
+
+
+origins = ["https://www.google.com"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+
 
 @app.get("/")
 def root():

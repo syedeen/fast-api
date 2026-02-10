@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 
 
 database_url = URL.create(
-    drivername="postgresql",
+    drivername="postgresql+psycopg",
     username=os.getenv("DB_USER"),
     password=os.getenv("DB_PASSWORD"),
     host=os.getenv("DB_HOST"),
@@ -18,7 +18,7 @@ database_url = URL.create(
     database=os.getenv("DB_NAME")
 )
 
-
+db_url_str = database_url.render_as_string(hide_password=False).replace("%", "%%")    ## for alembic
 
 engine = create_engine(
     url=database_url ,
