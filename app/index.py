@@ -53,7 +53,7 @@ app.add_middleware(
 def root():
     return {"welcome to my API"}
 
-
+print("DATABASE_URL VALUE:", repr(os.getenv("DATABASE_URL")))
 
 
 # create actor
